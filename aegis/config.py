@@ -9,7 +9,22 @@ load_dotenv()
 
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash-lite").strip()
+
+# Provider-aware default model. If LLM_MODEL_NAME isn't explicitly set, pick a
+# model that actually exists on the selected provider — otherwise a Groq deploy
+# would inherit the Gemini default ("gemini-2.0-flash-lite") and 404.
+_DEFAULT_MODELS = {
+    "gemini": "gemini-2.0-flash-lite",
+    "openai": "gpt-4o-mini",
+    "claude": "claude-3-5-sonnet-latest",
+    "anthropic": "claude-3-5-sonnet-latest",
+    "groq": "llama-3.3-70b-versatile",
+    "openrouter": "meta-llama/llama-3.3-70b-instruct",
+}
+LLM_MODEL_NAME = (
+    os.getenv("LLM_MODEL_NAME", "").strip()
+    or _DEFAULT_MODELS.get(LLM_PROVIDER, "gemini-2.0-flash-lite")
+)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
