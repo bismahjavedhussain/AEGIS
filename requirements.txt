@@ -11,3 +11,5 @@ langgraph-checkpoint==4.1.1
 openai==2.41.1
 httpx==0.28.1
 anyio==4.14.0
+google-genai==1.50.1
+pillow==11.3.0
