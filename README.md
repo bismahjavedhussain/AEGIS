@@ -1,7 +1,7 @@
 ---
 title: AEGIS - Antibiotic Safety Assistant
 emoji: 🛡️
-colorFrom: teal
+colorFrom: blue
 colorTo: green
 sdk: gradio
 sdk_version: "5.9.1"
