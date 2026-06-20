@@ -4,6 +4,8 @@ Entry point: create_app() → gr.Blocks
 Called by app.py after ONNX/LangGraph pre-warming.
 """
 
+import json
+import re
 import time
 import gradio as gr
 import logging
@@ -12,11 +14,44 @@ import logging
 try:
     from state import PatientProfile, AegisState
     from graph import aegis_graph
+    from config import call_vision_llm
     REAL_PIPELINE_AVAILABLE = True
 except ImportError:
     REAL_PIPELINE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+_VISION_PROMPT = """You are a medical document parser. Extract all readable information from this prescription or pill image:
+drug name, dose, frequency, prescribing diagnosis if visible, and any warnings.
+Return ONLY a JSON object with these fields (use null for anything illegible):
+{
+  "antibiotic_in_question": "<drug name or null>",
+  "chief_complaint": "<diagnosis/indication or null>",
+  "notes": "<any dosing instructions or warnings visible>"
+}"""
+
+
+def _extract_prescription_data(image_path: str):
+    """Run the uploaded prescription/pill photo through the vision LLM.
+
+    Returns the parsed dict, or None if extraction fails (image is simply
+    skipped — typed form fields remain the source of truth).
+    """
+    if not image_path or not REAL_PIPELINE_AVAILABLE:
+        return None
+    try:
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+        raw = call_vision_llm(image_bytes, _VISION_PROMPT)
+        cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            return json.loads(match.group()) if match else None
+    except Exception as exc:
+        logger.warning("[vision] Prescription image extraction failed: %s", exc)
+        return None
 
 # ==========================================
 # 1. CUSTOM CSS & AESTHETIC THEME
@@ -448,6 +483,18 @@ def generate_monitor_html(node_statuses):
 
 def run_simulation(symptoms, duration, severity, age, weight, medications, allergies, antibiotic, image):
     """Streaming generator — runs real pipeline if available, else falls back to simulation."""
+
+    # ── Optional: pull drug name / indication from an uploaded prescription or
+    #    pill photo, filling in any fields the user left blank or too short ──
+    if image:
+        extracted = _extract_prescription_data(image)
+        if extracted:
+            if (not antibiotic or len(antibiotic.strip()) < 3) and extracted.get("antibiotic_in_question"):
+                antibiotic = extracted["antibiotic_in_question"]
+                logger.info("[vision] Filled antibiotic from image: %s", antibiotic)
+            if (not symptoms or len(symptoms.strip()) < 5) and extracted.get("chief_complaint"):
+                symptoms = extracted["chief_complaint"]
+                logger.info("[vision] Filled chief complaint from image: %s", symptoms)
 
     # ── Validate ─────────────────────────────────────────────────────────────
     errors = validate_inputs(symptoms, age, weight, antibiotic)
