@@ -3,17 +3,18 @@ import os
 import re
 
 from dotenv import load_dotenv
-from tenacity import retry, stop_after_attempt, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, retry_if_exception, retry_if_exception_type
 
 load_dotenv()
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash-lite")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash-lite").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 
 _cfg_logger = logging.getLogger(__name__)
 
@@ -43,10 +44,12 @@ def _smart_wait(retry_state) -> float:
     return min(5 * (2 ** attempt), 60)
 
 
+# Only retry rate-limit (429) errors — auth/model/connection errors should fail
+# fast with a clear message instead of hanging through 6 escalating backoffs.
 llm_retry = retry(
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_exception(_is_rate_limit_error),
     wait=_smart_wait,
-    stop=stop_after_attempt(6),
+    stop=stop_after_attempt(4),
     reraise=True,
 )
 
@@ -105,7 +108,7 @@ def _build_gemini_client():
 
 def _build_openai_client():
     from openai import OpenAI, RateLimitError
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
 
     @retry(
         retry=retry_if_exception_type(RateLimitError),
@@ -132,7 +135,8 @@ def _build_groq_client():
     from openai import OpenAI
     client = OpenAI(
         api_key=GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
+        base_url="https://api.groq.com/openai/v1",
+        timeout=30.0,
     )
 
     @llm_retry
@@ -155,7 +159,8 @@ def _build_openrouter_client():
     from openai import OpenAI
     client = OpenAI(
         api_key=OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1"
+        base_url="https://openrouter.ai/api/v1",
+        timeout=30.0,
     )
 
     @llm_retry
@@ -223,7 +228,7 @@ def call_vision_llm(image_bytes: bytes, prompt: str) -> str:
     def _openai_vision():
         import base64
         from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = OpenAI(api_key=OPENAI_API_KEY, timeout=30.0)
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         response = client.chat.completions.create(
             model="gpt-4o",

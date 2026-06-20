@@ -510,12 +510,19 @@ def run_simulation(symptoms, duration, severity, age, weight, medications, aller
             antibiotic_in_question=antibiotic
         )
         initial_state = AegisState(patient_profile=profile)
-        
+
+        # Accumulate the final state from the stream so we DON'T have to run the
+        # entire pipeline a second time just to fetch the report.
+        accumulated_state: dict = {}
+
         # Stream graph updates
         for chunk in aegis_graph.stream(initial_state, stream_mode="updates"):
             for node_name, delta in chunk.items():
                 if node_name.startswith("__"): continue
-                
+
+                if isinstance(delta, dict):
+                    accumulated_state.update(delta)
+
                 # Map LangGraph nodes to UI monitor nodes
                 ui_map = {
                     "intake": ["intake"],
@@ -538,9 +545,8 @@ def run_simulation(symptoms, duration, severity, age, weight, medications, aller
                 
                 yield (gr.update(), gr.update(), generate_monitor_html(node_statuses), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
 
-        # Grab final state for the report
-        final_state = aegis_graph.invoke(initial_state)
-        report_data = _map_graph_state_to_report(final_state)
+        # Build the report from the state we already accumulated while streaming
+        report_data = _map_graph_state_to_report(accumulated_state)
         yield from _render_report(report_data, node_statuses)
 
     except Exception as exc:
